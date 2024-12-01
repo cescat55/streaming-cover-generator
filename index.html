@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>圖片編輯器</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300;1,400;1,700;1,900&display=swap" rel="stylesheet">
     <style>
         #canvas-container {
             position: relative;
@@ -24,6 +27,35 @@
         #imageInput {
             display: none;
         }
+        .text-editor {
+            position: absolute;
+            display: none;
+            z-index: 1000;
+            background: white;
+            border: 1px solid #ccc;
+        }
+        .text-editor textarea {
+            font-family: Merriweather;
+            font-size: 16px;
+            padding: 5px;
+            border: none;
+            resize: both;
+            overflow: auto;
+        }
+        .text-controls {
+            display: none; /* 預設禁止使用者新增自訂文字 */
+            background: #f5f5f5;
+            padding: 20px;
+            margin: 20px;
+            border-radius: 5px;
+        }
+        .text-controls input, .text-controls select {
+            margin: 5px;
+            padding: 5px;
+        }
+        .text-controls button {
+            margin: 5px;
+        }
     </style>
 </head>
 <body>
@@ -32,25 +64,125 @@
         <input type="file" id="imageInput" multiple accept="image/*">
         <button onclick="downloadImage()">下載圖片</button>
     </div>
+
+    <div class="text-controls">
+        <h3>文字編輯</h3>
+        <div>
+            <input type="text" id="textInput" placeholder="輸入文字">
+            <input type="number" id="fontSizeInput" value="20" min="8" max="100">
+            <select id="positionPreset">
+                <option value="center">中央</option>
+                <option value="topLeft">左上</option>
+                <option value="topRight">右上</option>
+                <option value="bottomLeft">左下</option>
+                <option value="bottomRight">右下</option>
+            </select>
+            <button onclick="addPresetText()">新增預設文字</button>
+        </div>
+    </div>
+
     <div id="canvas-container">
         <canvas id="canvas"></canvas>
+        <div class="text-editor">
+            <textarea rows="4" cols="50"></textarea>
+        </div>
     </div>
 
     <script>
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const container = document.getElementById('canvas-container');
+        const textEditor = document.querySelector('.text-editor');
+        const textArea = textEditor.querySelector('textarea');
+        const textInput = document.getElementById('textInput');
+        const fontSizeInput = document.getElementById('fontSizeInput');
+        const positionPreset = document.getElementById('positionPreset');
         canvas.width = container.offsetWidth;
         canvas.height = container.offsetHeight;
 
         let images = [];
+        let texts = [];
         let selectedImage = null;
+        let selectedText = null;
         let isDragging = false;
         let isResizing = false;
         let startX, startY;
         let foreground, background;
         let resizeHandle = '';
         let keepAspectRatio = true; // 新增變數控制是否保持比例
+        let isEditingText = false;
+        let fontFamily = 'Merriweather';
+
+        // 文字物件建構函數
+        function TextObject(x, y, text, fontSize = 20, fillStyle = '#000') {
+            return {
+                x: x,
+                y: y,
+                text: text,
+                fontSize: fontSize,
+                width: 100,
+                height: 30,
+                fillStyle: fillStyle
+            };
+        }
+        // 建立文字物件
+        function createPresetText(textContent, fontSize, x, y, fillStyle) {
+            ctx.font = `${fontSize}px ${fontFamily}`;
+            const metrics = ctx.measureText(textContent);
+            
+            const newText = TextObject(x, y, textContent, fontSize, fillStyle);
+            texts.push(newText);
+            drawCanvas();
+        }
+
+        // 新增預設位置文字
+        function addPresetText() {
+            const textContent = textInput.value || '預設文字';
+            const fontSize = parseInt(fontSizeInput.value) || 20;
+            const position = positionPreset.value;
+            
+            ctx.font = `${fontSize}px ${fontFamily}`;
+            const metrics = ctx.measureText(textContent);
+            const textWidth = metrics.width;
+            let x = 50;
+            let y = 50;
+
+            switch(position) {
+                case 'center':
+                    x = (canvas.width - textWidth) / 2;
+                    y = canvas.height / 2;
+                    break;
+                case 'topLeft':
+                    x = 50;
+                    y = 50;
+                    break;
+                case 'topRight':
+                    x = canvas.width - textWidth - 50;
+                    y = 50;
+                    break;
+                case 'bottomLeft':
+                    x = 50;
+                    y = canvas.height - 50;
+                    break;
+                case 'bottomRight':
+                    x = canvas.width - textWidth - 50;
+                    y = canvas.height - 50;
+                    break;
+            }
+            
+            createPresetText(textContent, fontSize, x, y);
+        }
+
+        // 顯示文字編輯器
+        function showTextEditor(text) {
+            setTimeout(() => { textEditor.style.display = 'block'; }, 100);
+            textEditor.style.left = text.x + 'px';
+            textEditor.style.top = (text.y - text.fontSize) + 'px';
+            textArea.value = text.text;
+            textArea.style.fontSize = text.fontSize + 'px';
+            textArea.style.fontFamily = fontFamily;
+            textArea.focus();
+        }
 
         // 載入固定背景和前景
         function loadFixedImages() {
@@ -103,27 +235,7 @@
             images.forEach(img => {
                 ctx.drawImage(img.img, img.x, img.y, img.width, img.height);
                 if (img === selectedImage && !hideControls) {
-                    // 繪製選取框
-                    ctx.strokeStyle = '#00f';
-                    ctx.strokeRect(img.x, img.y, img.width, img.height);
-                    
-                    // 繪製調整大小的控制點
-                    const handleSize = 8;
-                    ctx.fillStyle = '#fff';
-                    ctx.strokeStyle = '#00f';
-                    
-                    // 四個角落的控制點
-                    ctx.fillRect(img.x - handleSize/2, img.y - handleSize/2, handleSize, handleSize);
-                    ctx.strokeRect(img.x - handleSize/2, img.y - handleSize/2, handleSize, handleSize);
-                    
-                    ctx.fillRect(img.x + img.width - handleSize/2, img.y - handleSize/2, handleSize, handleSize);
-                    ctx.strokeRect(img.x + img.width - handleSize/2, img.y - handleSize/2, handleSize, handleSize);
-                    
-                    ctx.fillRect(img.x - handleSize/2, img.y + img.height - handleSize/2, handleSize, handleSize);
-                    ctx.strokeRect(img.x - handleSize/2, img.y + img.height - handleSize/2, handleSize, handleSize);
-                    
-                    ctx.fillRect(img.x + img.width - handleSize/2, img.y + img.height - handleSize/2, handleSize, handleSize);
-                    ctx.strokeRect(img.x + img.width - handleSize/2, img.y + img.height - handleSize/2, handleSize, handleSize);
+                    drawControls(img);
                 }
             });
 
@@ -131,27 +243,93 @@
             if (foreground) {
                 ctx.drawImage(foreground, 0, 0, canvas.width, canvas.height);
             }
+
+            texts.forEach(text => {
+                if (!isEditingText || text !== selectedText) {
+                    ctx.font = `${text.fontSize}px ${fontFamily}`;
+                    ctx.fillStyle = text.fillStyle || '#000';
+                    ctx.fillText(text.text, text.x, text.y + text.fontSize);
+                    
+                    if (text === selectedText && !hideControls) {
+                        drawTextControls(text);
+                    }
+                }
+            });
         }
 
-        // 檢查滑鼠是否在調整大小的控制點上
-        function getResizeHandle(x, y) {
-            if (!selectedImage) return '';
+        // 繪製控制點
+        function drawControls(obj) {
+            const handleSize = 8;
+            ctx.strokeStyle = '#00f';
+            ctx.strokeRect(obj.x, obj.y, obj.width, obj.height);
+            
+            ctx.fillStyle = '#fff';
+            ctx.strokeStyle = '#00f';
+            
+            const corners = [
+                {x: obj.x, y: obj.y},
+                {x: obj.x + obj.width, y: obj.y},
+                {x: obj.x, y: obj.y + obj.height},
+                {x: obj.x + obj.width, y: obj.y + obj.height}
+            ];
+            
+            corners.forEach(corner => {
+                ctx.fillRect(corner.x - handleSize/2, corner.y - handleSize/2, handleSize, handleSize);
+                ctx.strokeRect(corner.x - handleSize/2, corner.y - handleSize/2, handleSize, handleSize);
+            });
+        }
+
+        // 繪製文字控制點
+        function drawTextControls(text) {
+            ctx.font = `${text.fontSize}px ${fontFamily}`;
+            const metrics = ctx.measureText(text.text);
+            const height = text.fontSize;
+            
+            ctx.strokeStyle = '#00f';
+            ctx.strokeRect(text.x, text.y, metrics.width, height);
             
             const handleSize = 8;
-            const handles = {
-                'nw': {x: selectedImage.x, y: selectedImage.y},
-                'ne': {x: selectedImage.x + selectedImage.width, y: selectedImage.y},
-                'sw': {x: selectedImage.x, y: selectedImage.y + selectedImage.height},
-                'se': {x: selectedImage.x + selectedImage.width, y: selectedImage.y + selectedImage.height}
-            };
+            ctx.fillStyle = '#fff';
             
-            for (let pos in handles) {
-                if (Math.abs(x - handles[pos].x) <= handleSize/2 && 
-                    Math.abs(y - handles[pos].y) <= handleSize/2) {
-                    return pos;
+            // 繪製四個角落的控制點
+            const corners = [
+                {x: text.x, y: text.y},
+                {x: text.x + metrics.width, y: text.y},
+                {x: text.x, y: text.y + height},
+                {x: text.x + metrics.width, y: text.y + height}
+            ];
+            
+            corners.forEach(corner => {
+                ctx.fillRect(corner.x - handleSize/2, corner.y - handleSize/2, handleSize, handleSize);
+                ctx.strokeRect(corner.x - handleSize/2, corner.y - handleSize/2, handleSize, handleSize);
+            });
+        }
+
+        // 檢查點擊位置
+        function checkClick(x, y) {
+            // 先檢查文字
+            for (let i = texts.length - 1; i >= 0; i--) {
+                const text = texts[i];
+                ctx.font = `${text.fontSize}px ${fontFamily}`;
+                const metrics = ctx.measureText(text.text);
+                const height = text.fontSize;
+                
+                if (x >= text.x && x <= text.x + metrics.width &&
+                    y >= text.y && y <= text.y + height) {
+                    return {type: 'text', object: text};
                 }
             }
-            return '';
+            
+            // 再檢查圖片
+            for (let i = images.length - 1; i >= 0; i--) {
+                const img = images[i];
+                if (x >= img.x && x <= img.x + img.width &&
+                    y >= img.y && y <= img.y + img.height) {
+                    return {type: 'image', object: img};
+                }
+            }
+            
+            return null;
         }
 
         // 滑鼠事件處理
@@ -160,23 +338,36 @@
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
-            resizeHandle = getResizeHandle(x, y);
-            if (resizeHandle) {
-                isResizing = true;
-                startX = x;
-                startY = y;
-                return;
-            }
-
-            images.forEach(img => {
-                if (x >= img.x && x <= img.x + img.width &&
-                    y >= img.y && y <= img.y + img.height) {
-                    selectedImage = img;
+            const clicked = checkClick(x, y);
+            
+            if (clicked) {
+                if (clicked.type === 'text') {
+                    selectedText = clicked.object;
+                    selectedImage = null;
+                    
+                    // 雙擊編輯文字
+                    if (e.detail === 2) {
+                        isEditingText = true;
+                        showTextEditor(selectedText);
+                    } else {
+                        isDragging = true;
+                        startX = x - selectedText.x;
+                        startY = y - selectedText.y;
+                    }
+                } else {
+                    selectedImage = clicked.object;
+                    selectedText = null;
                     isDragging = true;
-                    startX = x - img.x;
-                    startY = y - img.y;
+                    startX = x - selectedImage.x;
+                    startY = y - selectedImage.y;
                 }
-            });
+            } else {
+                selectedImage = null;
+                selectedText = null;
+                textEditor.style.display = 'none';
+                isEditingText = false;
+            }
+            
             drawCanvas();
         });
 
@@ -184,71 +375,19 @@
             const rect = canvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
-            
-            // 調整游標樣式
-            const handle = getResizeHandle(x, y);
-            if (handle === 'nw' || handle === 'se') {
-                canvas.style.cursor = 'nw-resize';
-            } else if (handle === 'ne' || handle === 'sw') {
-                canvas.style.cursor = 'ne-resize';
-            } else if (selectedImage && x >= selectedImage.x && x <= selectedImage.x + selectedImage.width &&
-                       y >= selectedImage.y && y <= selectedImage.y + selectedImage.height) {
-                canvas.style.cursor = 'move';
-            } else {
-                canvas.style.cursor = 'default';
-            }
 
-            if (isResizing && selectedImage) {
-                const dx = x - startX;
-                const dy = y - startY;
-                
-                if (keepAspectRatio) {
-                    // 保持比例調整大小
-                    if (resizeHandle.includes('e') || resizeHandle.includes('w')) {
-                        const newWidth = Math.max(50, selectedImage.width + (resizeHandle.includes('e') ? dx : -dx));
-                        const newHeight = newWidth / selectedImage.aspectRatio;
-                        
-                        if (resizeHandle.includes('w')) {
-                            selectedImage.x += selectedImage.width - newWidth;
-                        }
-                        selectedImage.width = newWidth;
-                        selectedImage.height = newHeight;
-                    } else if (resizeHandle.includes('n') || resizeHandle.includes('s')) {
-                        const newHeight = Math.max(50, selectedImage.height + (resizeHandle.includes('s') ? dy : -dy));
-                        const newWidth = newHeight * selectedImage.aspectRatio;
-                        
-                        if (resizeHandle.includes('n')) {
-                            selectedImage.y += selectedImage.height - newHeight;
-                        }
-                        selectedImage.height = newHeight;
-                        selectedImage.width = newWidth;
+            if (isDragging) {
+                if (selectedText) {
+                    selectedText.x = x - startX;
+                    selectedText.y = y - startY;
+                    if (isEditingText) {
+                        textEditor.style.left = selectedText.x + 'px';
+                        textEditor.style.top = (selectedText.y - selectedText.fontSize) + 'px';
                     }
-                } else {
-                    // 自由調整大小
-                    if (resizeHandle.includes('e')) {
-                        selectedImage.width = Math.max(50, selectedImage.width + dx);
-                    }
-                    if (resizeHandle.includes('s')) {
-                        selectedImage.height = Math.max(50, selectedImage.height + dy);
-                    }
-                    if (resizeHandle.includes('w')) {
-                        const newWidth = Math.max(50, selectedImage.width - dx);
-                        selectedImage.x += selectedImage.width - newWidth;
-                        selectedImage.width = newWidth;
-                    }
-                    if (resizeHandle.includes('n')) {
-                        const newHeight = Math.max(50, selectedImage.height - dy);
-                        selectedImage.y += selectedImage.height - newHeight;
-                        selectedImage.height = newHeight;
-                    }
+                } else if (selectedImage) {
+                    selectedImage.x = x - startX;
+                    selectedImage.y = y - startY;
                 }
-                
-                startX = x;
-                startY = y;
-                drawCanvas();
-            } else if (isDragging && selectedImage) {
-                selectedImage.x = x - startX;
-                selectedImage.y = y - startY;
                 drawCanvas();
             }
         });
@@ -258,16 +397,49 @@
             isResizing = false;
         });
 
+        // 文字編輯處理
+        textArea.addEventListener('input', () => {
+            if (selectedText) {
+                selectedText.text = textArea.value;
+                drawCanvas();
+            }
+        });
+
+        textArea.addEventListener('blur', () => {
+            if (selectedText) {
+                selectedText.text = textArea.value;
+                isEditingText = false;
+                textEditor.style.display = 'none';
+                drawCanvas();
+            }
+        });
+
+        textArea.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                textArea.blur();
+            }
+        });
+
         // 鍵盤事件處理
         document.addEventListener('keydown', (e) => {
-            if (selectedImage) {
-                if (e.key === 'Delete' || e.key === 'Backspace') {
-                    images = images.filter(img => img !== selectedImage);
-                    selectedImage = null;
-                    drawCanvas();
-                } else if (e.key === 'r' || e.key === 'R') {
-                    // 按R鍵切換是否保持比例
-                    keepAspectRatio = !keepAspectRatio;
+            if (!isEditingText) {
+                if (selectedImage) {
+                    if (e.key === 'Delete' || e.key === 'Backspace') {
+                        images = images.filter(img => img !== selectedImage);
+                        selectedImage = null;
+                        drawCanvas();
+                    } else if (e.key === 'r' || e.key === 'R') {
+                        // 按R鍵切換是否保持比例
+                        keepAspectRatio = !keepAspectRatio;
+                    }
+                } else if (selectedText) {
+                    if (e.key === 'Delete' || e.key === 'Backspace') {
+                        texts = texts.filter(text => text !== selectedText);
+                        selectedText = null;
+                        textEditor.style.display = 'none';
+                        drawCanvas();
+                    }
                 }
             }
         });
@@ -284,6 +456,10 @@
 
         // 初始化
         loadFixedImages();
+
+        createPresetText("10/24", 100, 1573, 723, '#fff');
+        createPresetText("10:10 ~", 69, 1547, 847, '#fff');
+        createPresetText("22:59", 69, 1658, 915, '#fff');
     </script>
 </body>
 </html>
