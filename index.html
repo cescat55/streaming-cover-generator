@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>圖片編輯器</title>
+    <style>
+        #canvas-container {
+            position: relative;
+            width: 1920px;
+            height: 1080px;
+            border: 1px solid #ccc;
+            margin: 20px auto;
+        }
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .controls {
+            text-align: center;
+            margin: 20px;
+        }
+        #imageInput {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <button onclick="document.getElementById('imageInput').click()">上傳圖片</button>
+        <input type="file" id="imageInput" multiple accept="image/*">
+        <button onclick="downloadImage()">下載圖片</button>
+    </div>
+    <div id="canvas-container">
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const container = document.getElementById('canvas-container');
+        canvas.width = container.offsetWidth;
+        canvas.height = container.offsetHeight;
+
+        let images = [];
+        let selectedImage = null;
+        let isDragging = false;
+        let isResizing = false;
+        let startX, startY;
+        let foreground, background;
+        let resizeHandle = '';
+
+        // 載入固定背景和前景
+        function loadFixedImages() {
+            background = new Image();
+            background.src = 'background.png';
+            background.onload = () => drawCanvas();
+
+            foreground = new Image();
+            foreground.src = 'foreground.png';
+            foreground.onload = () => drawCanvas();
+        }
+
+        // 處理圖片上傳
+        document.getElementById('imageInput').addEventListener('change', (e) => {
+            const files = e.target.files;
+            for (let file of files) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.src = event.target.result;
+                    img.onload = () => {
+                        const aspectRatio = img.width / img.height;
+                        const newWidth = 200;
+                        const newHeight = newWidth / aspectRatio;
+                        images.push({
+                            img: img,
+                            x: Math.random() * (canvas.width - newWidth),
+                            y: Math.random() * (canvas.height - newHeight),
+                            width: newWidth,
+                            height: newHeight,
+                            aspectRatio: aspectRatio
+                        });
+                        drawCanvas();
+                    };
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // 繪製畫布
+        function drawCanvas() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // 繪製背景
+            if (background) {
+                ctx.drawImage(background, 0, 0, canvas.width, canvas.height);
+            }
+
+            // 繪製上傳的圖片
+            images.forEach(img => {
+                ctx.drawImage(img.img, img.x, img.y, img.width, img.height);
+                if (img === selectedImage) {
+                    // 繪製選取框
+                    ctx.strokeStyle = '#00f';
+                    ctx.strokeRect(img.x, img.y, img.width, img.height);
+                    
+                    // 繪製調整大小的控制點
+                    const handleSize = 8;
+                    ctx.fillStyle = '#fff';
+                    ctx.strokeStyle = '#00f';
+                    
+                    // 四個角落的控制點
+                    ctx.fillRect(img.x - handleSize/2, img.y - handleSize/2, handleSize, handleSize);
+                    ctx.strokeRect(img.x - handleSize/2, img.y - handleSize/2, handleSize, handleSize);
+                    
+                    ctx.fillRect(img.x + img.width - handleSize/2, img.y - handleSize/2, handleSize, handleSize);
+                    ctx.strokeRect(img.x + img.width - handleSize/2, img.y - handleSize/2, handleSize, handleSize);
+                    
+                    ctx.fillRect(img.x - handleSize/2, img.y + img.height - handleSize/2, handleSize, handleSize);
+                    ctx.strokeRect(img.x - handleSize/2, img.y + img.height - handleSize/2, handleSize, handleSize);
+                    
+                    ctx.fillRect(img.x + img.width - handleSize/2, img.y + img.height - handleSize/2, handleSize, handleSize);
+                    ctx.strokeRect(img.x + img.width - handleSize/2, img.y + img.height - handleSize/2, handleSize, handleSize);
+                }
+            });
+
+            // 繪製前景
+            if (foreground) {
+                ctx.drawImage(foreground, 0, 0, canvas.width, canvas.height);
+            }
+        }
+
+        // 檢查滑鼠是否在調整大小的控制點上
+        function getResizeHandle(x, y) {
+            if (!selectedImage) return '';
+            
+            const handleSize = 8;
+            const handles = {
+                'nw': {x: selectedImage.x, y: selectedImage.y},
+                'ne': {x: selectedImage.x + selectedImage.width, y: selectedImage.y},
+                'sw': {x: selectedImage.x, y: selectedImage.y + selectedImage.height},
+                'se': {x: selectedImage.x + selectedImage.width, y: selectedImage.y + selectedImage.height}
+            };
+            
+            for (let pos in handles) {
+                if (Math.abs(x - handles[pos].x) <= handleSize/2 && 
+                    Math.abs(y - handles[pos].y) <= handleSize/2) {
+                    return pos;
+                }
+            }
+            return '';
+        }
+
+        // 滑鼠事件處理
+        canvas.addEventListener('mousedown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            resizeHandle = getResizeHandle(x, y);
+            if (resizeHandle) {
+                isResizing = true;
+                startX = x;
+                startY = y;
+                return;
+            }
+
+            images.forEach(img => {
+                if (x >= img.x && x <= img.x + img.width &&
+                    y >= img.y && y <= img.y + img.height) {
+                    selectedImage = img;
+                    isDragging = true;
+                    startX = x - img.x;
+                    startY = y - img.y;
+                }
+            });
+            drawCanvas();
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            // 調整游標樣式
+            const handle = getResizeHandle(x, y);
+            if (handle === 'nw' || handle === 'se') {
+                canvas.style.cursor = 'nw-resize';
+            } else if (handle === 'ne' || handle === 'sw') {
+                canvas.style.cursor = 'ne-resize';
+            } else if (selectedImage && x >= selectedImage.x && x <= selectedImage.x + selectedImage.width &&
+                       y >= selectedImage.y && y <= selectedImage.y + selectedImage.height) {
+                canvas.style.cursor = 'move';
+            } else {
+                canvas.style.cursor = 'default';
+            }
+
+            if (isResizing && selectedImage) {
+                const dx = x - startX;
+                const dy = y - startY;
+                
+                if (resizeHandle.includes('e')) {
+                    selectedImage.width = Math.max(50, selectedImage.width + dx);
+                }
+                if (resizeHandle.includes('s')) {
+                    selectedImage.height = Math.max(50, selectedImage.height + dy);
+                }
+                if (resizeHandle.includes('w')) {
+                    const newWidth = Math.max(50, selectedImage.width - dx);
+                    selectedImage.x += selectedImage.width - newWidth;
+                    selectedImage.width = newWidth;
+                }
+                if (resizeHandle.includes('n')) {
+                    const newHeight = Math.max(50, selectedImage.height - dy);
+                    selectedImage.y += selectedImage.height - newHeight;
+                    selectedImage.height = newHeight;
+                }
+                
+                startX = x;
+                startY = y;
+                drawCanvas();
+            } else if (isDragging && selectedImage) {
+                selectedImage.x = x - startX;
+                selectedImage.y = y - startY;
+                drawCanvas();
+            }
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            isDragging = false;
+            isResizing = false;
+        });
+
+        // 鍵盤事件處理
+        document.addEventListener('keydown', (e) => {
+            if (selectedImage) {
+                if (e.key === 'Delete' || e.key === 'Backspace') {
+                    images = images.filter(img => img !== selectedImage);
+                    selectedImage = null;
+                    drawCanvas();
+                }
+            }
+        });
+
+        // 下載圖片
+        function downloadImage() {
+            const link = document.createElement('a');
+            link.download = '編輯後的圖片.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+
+        // 初始化
+        loadFixedImages();
+    </script>
+</body>
+</html>
